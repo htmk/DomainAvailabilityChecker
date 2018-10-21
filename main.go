@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/likexian/whois-go"
-	"github.com/likexian/whois-parser-go"
+	whoisParser "github.com/likexian/whois-parser-go"
+	"github.com/mattn/go-isatty"
+	"io/ioutil"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -18,12 +22,37 @@ const (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Please enter a domain name")
+		fmt.Println("usage: ./DomainAvailabilityChecker <domain name> [number of tlds to check, default = 10]")
 		return
 	}
 
 	input := os.Args[1]
-	tlds := []string{"com", "net", "dk", "org", "xxx", "io", "co.uk"}
+
+	tldnum := 10
+	if len(os.Args) == 3 {
+		tldnum, _ = strconv.Atoi(os.Args[2])
+	}
+	tlds := make([]string,int(tldnum))
+
+	list, err := ioutil.ReadFile("tldlist")
+
+	if err != nil {
+		tlds = []string{"com","net","org","co","xyz","info","io","me","top","in"}
+		//panic(err)
+	}else{
+		split := bytes.Split(list, []byte("\n"))
+		if tldnum > len(split){
+			tldnum = len(split)
+		}
+		for i := 0; i < tldnum; i++ {
+			tlds[i] = string(split[i])
+		}
+	}
+	endOnly := false
+	if !isatty.IsTerminal(os.Stdout.Fd()) {
+		endOnly = true
+	}
+	//fmt.Print(string(list))
 
 	var state sync.Map
 	for _, tld := range tlds {
@@ -69,25 +98,35 @@ func main() {
 			_, err := net.LookupHost(name)
 			if err == nil {
 				state.Store(tld, unavailable)
-				printState()
+				if !endOnly {
+					printState()
+				}
 			}
 		}()
 
 		go func() {
 			defer wg.Done()
 			rawResult, _ := whois.Whois(name)
-			result, err := whois_parser.Parser(rawResult)
+			result, err := whoisParser.Parse(rawResult)
 			if err == nil {
 				if result.Registrar.DomainStatus != "" {
 					state.Store(tld, unavailable)
-					printState()
+					if !endOnly{
+						printState()
+					}
 				} else {
 					state.Store(tld, available)
-					printState()
+					if !endOnly{
+						printState()
+					}
 				}
 			}
 		}()
 	}
 
 	wg.Wait()
+
+	if endOnly{
+		printState()
+	}
 }
